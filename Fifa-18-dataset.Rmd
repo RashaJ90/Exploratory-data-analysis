@@ -1,0 +1,341 @@
+---
+title: "fifa-18"
+author: "Rasha Jaber "
+date: "May 19, 2020"
+output: html_document
+---
+
+Required Libraries:
+```{r, echo=FALSE}
+library(ggplot2)
+library(dplyr)
+library(corrplot)
+library(scales)   # needed for formatting y-axis labels to non-scientific type
+library(radarchart)
+library(tidyr)
+library(tidyverse)
+library(reshape2) # melt
+library(ggthemes)
+library(rworldmap) # world map
+library(modelr)
+library(radarchart) #Spider chart
+library(e1071) # for checking skewness
+library(MASS) # regression model 
+
+options("scipen"=100, "digits"=4)  # avoid scientific display of digits. Take 4 digits. 
+
+```
+
+
+Basic Statistics      
+
+
+```{r}
+#Loading the data:
+fifa_players <- data.frame(read.csv(url("https://raw.githubusercontent.com/DataScienceHU/DataAnalysisR_2020/master/data/fifa_data.csv")))
+# Pre-processing: 
+for (i in c(3,6,7,10:71)) {
+  fifa_players[,i]<-as.numeric((fifa_players[,i]))
+}
+fifa<-na.omit(fifa_players)
+fifa_players<-fifa
+fifa_players_info<-fifa[,c(1:11)] # players general info 
+fifa_players_attribures<-fifa[,c(1,12:45, 6)] # players different skills. Add overall
+fifa_players_positions<-fifa[,c(1,46:72,6)] # players ability at different positions . Add overall 
+
+
+head(fifa_players)
+
+##plot showing the age distribution of all players
+
+#Histogram 
+ggplot(data = fifa_players,aes(x=Age))+
+  geom_bar()+
+  xlab("Players Age")+
+  ylab("Count")+
+  labs(title="a. Players Age Bar Chart")+
+  theme_economist()
+
+
+##plot comparing the *overall* ability of players in different leagues
+#Boxplot
+ ggplot(data = fifa_players,aes(x=League,y = Overall))+
+  geom_boxplot()+
+  theme_economist()+
+  #theme(axis.text.x = element_text(face = "bold", size = 10, angle = -50, hjust = 0))+
+  xlab("League")+
+  ylab("Overall")+
+  coord_flip()+
+  labs(title="b. Players Overall Quality by League")
+
+##plots showing the density of players' salary ('Wage') distribution VS  the density distribution of the *log* of players' salary
+
+# positive wage only
+players_Wage = fifa_players$Wage[fifa_players$Wage > 0]
+zero_wage = fifa_players$Wage[fifa_players$Wage == 0]
+
+# density
+ggplot(data = fifa_players,aes(x=Wage))+
+  geom_density()+
+  labs(title="c. Players Salary Distribution")+
+  theme_economist()
+
+# same with log-transform
+ggplot(data = fifa_players,aes(x=Wage))+
+  scale_x_continuous(trans='log10') +  # plot on log-scale 
+  geom_density()+
+  labs(title="c. Players Salary Distribution (log-scale)")+
+  theme_economist()
+
+#skewness + kurtosis
+skewness(players_Wage)
+skewness(log(players_Wage))
+
+kurtosis(players_Wage)#positive
+kurtosis(log(players_Wage))#negative
+
+#better described by a Normal distribution?
+qqnorm(players_Wage)
+qqline(players_Wage, col = "steelblue", lwd = 2)
+
+qqnorm(log(players_Wage))
+qqline(log(players_Wage), col = "steelblue", lwd = 2)
+
+
+
+
+## Tables of top-10 players with the highest value and the top-10 best players in terms of *overall* ability with comparison
+fifa_players_info_ordered_by_value<-fifa_players_info[order(fifa_players_info$Value,decreasing = TRUE),]
+fifa_best_10_by_value<-fifa_players_info_ordered_by_value[1:10,c(1,10)]
+
+fifa_players_info_ordered_by_overall<-fifa_players_info[order(fifa_players_info$Overall,decreasing = TRUE ),]
+fifa_best_10_by_overall<- fifa_players_info_ordered_by_overall[1:10,c(1,6)]
+
+
+common<-fifa_best_10_by_value %>% inner_join (fifa_best_10_by_overall ,by=("ID"))
+common
+best_player_ID <-fifa_best_10_by_overall$ID[-which(fifa_best_10_by_overall$ID %in% common$ID)]
+best_player <- fifa_players_info$Name[which(fifa_players_info$ID == "167495")]
+best_player#M. Neuer
+# 8 of the top-10 players with the highest value also the best players in terms of *overall* ability
+
+
+
+## Table of the ten *best* and ten *worst* teams in terms of *average* player overall ability
+n <-aggregate(Overall~Club,data=fifa_players_info,FUN=mean)
+nordered<- n[order(n$Overall),]
+fifa_worst_clubs <- nordered %>% head(10) 
+names(fifa_worst_clubs) <- c("Worst_clubs", "Overall")
+fifa_best_clubs <- nordered %>% tail(10) %>% arrange(desc(Overall)) 
+names(fifa_best_clubs) <- c("Best_clubs", "Overall")
+
+fifa_worst_and_best_10_by_mean_of_overall <- cbind(fifa_worst_clubs,fifa_best_clubs )
+fifa_worst_and_best_10_by_mean_of_overall
+```
+
+
+
+Scouting Report 
+
+
+```{r}
+## World map where each country is colored based on the *total number of players* from these nationalities
+
+nations <- aggregate(rep(1,length=nrow(fifa)),by=list(fifa$Nationality),FUN=sum)
+names(nations)<-c("Nationality","count") # Prepare data to plot
+
+fr <- joinCountryData2Map(dF = nations, joinCode = "NAME", nameJoinColumn = "Nationality",verbose=F) # Prepare data to plot
+
+mapCountryData(mapToPlot = fr, nameColumnToPlot = "count",catMethod = "fixedWidth",
+               oceanCol = "steelblue1", missingCountryCol = "white",
+               mapTitle = "a. Number of players by country",
+               aspect = "variable") # Plot Worlmap
+
+##World map where each country is colored by the *average overall quality* of players from these countries
+
+nations.quality <- aggregate(fifa_players$Overall,by=list(fifa_players$Nationality),FUN=mean)
+names(nations.quality)<-c("Nationality","Overall Quality") # Prepare data to plot
+fr <- joinCountryData2Map(dF = nations.quality, joinCode = "NAME", nameJoinColumn = "Nationality",verbose=F) # Prepare data to plot
+
+mapCountryData(mapToPlot = fr, nameColumnToPlot = "Overall Quality",catMethod = "fixedWidth",
+               oceanCol = "steelblue1", missingCountryCol = "white",
+               mapTitle = "b. Average Overall Players' Quality by country",
+               aspect = "variable") # Plot Worlmap
+
+under_represented_country <- left_join(nations, nations.quality,"Nationality")
+under_represented_country %>% filter(count < 20, `Overall Quality` >70)
+
+
+##The *average overall* ability by *age* of all players, for players 35 years old or younger
+
+age_to_overall = aggregate(fifa_players$Overall, by = list(fifa_players$Age),FUN = mean)
+ggplot(data = subset(age_to_overall,Group.1<=35),aes(x=Group.1,y=x))+
+   xlab("Age")+
+  ylab("Overall")+
+  labs(title="c. Players Overall Performance by Age") +
+  geom_line()
+
+##The *average difference* between a player's overall ability to potential ability as a function of age, up to age 35
+
+fifa$Room_to_improve = fifa$Potential-fifa$Overall
+Room_to_improve = aggregate(fifa$Room_to_improve, by = list(fifa$Age),FUN = mean)
+ggplot(data = subset(Room_to_improve,Group.1<=35),aes(x=Group.1,y=x))+
+  geom_line()+
+  geom_point(color="red",size=2)+
+   xlab("Age")+
+  ylab("Potential-Overall")+
+  labs(title="d. Players Overall room for improvement by age") +
+  theme_fivethirtyeight()+
+  geom_vline(xintercept = c(16,25))+
+  geom_segment(aes(x = 17.5, y = 20, xend = 16, yend = 20),
+                  arrow = arrow(length = unit(0.5, "cm")))+
+  geom_segment(aes(x = 23.5, y = 20, xend = 25, yend = 20),
+                  arrow = arrow(length = unit(0.5, "cm")))+
+  geom_text(x=20.5, y=20, label="players for future \n development")
+
+## The 10 most-undervalued players [young players(age <=21) with high Overall ability (>70)], i.e. currently lowest payed compared to their potential
+
+Young_players <- subset(fifa_players_info, fifa_players_info$Age <= 21 & fifa_players_info$Overall > 70) 
+head(Young_players)
+
+potential_players <- subset(fifa_players, Overall>70 & Age<=21)
+lm.potential <- lm(Potential ~ (Wage), data=potential_players)
+potential_players$resid <- round(resid(lm.potential), 3) # potential_players %>% add_residuals(lm.potential)
+potential_players$MarketWage <- round((potential_players$Potential - lm.potential$coefficients[[1]]) / lm.potential$coefficients[[2]], 3)
+ggplot(data = potential_players,aes(x=Wage,y =Potential ))+
+#  scale_x_continuous(trans='log10')+
+  scale_y_continuous(labels = comma)+
+  geom_smooth(method='lm', formula= y~x) +
+  labs(title="e. Players Potential vs. Wage") +
+  geom_point(aes(color=Overall))
+
+
+```
+
+
+
+Model Building
+
+
+```{r}
+
+##The correlation between players ability in each pair of 29 skills[for non-goalkeeper players]
+corr_skills <- as.matrix(round(cor(fifa_players_attribures[,c(2:12, 18:35)]), 2))
+
+#Heatmap PLot
+ggplot(melt(corr_skills), aes(x=Var1, y=Var2, fill=value)) + 
+  geom_tile()+scale_fill_distiller(palette = "Spectral")
+
+
+#upper triangles of the correlation matrix
+get_upper_tri <- function(corr_skills){
+    corr_skills[lower.tri(corr_skills)]<- NA
+    return(corr_skills)
+  }
+
+upper_tri <- get_upper_tri(corr_skills)
+
+ggplot(melt(upper_tri, na.rm = TRUE), aes(Var2, Var1, fill = value))+
+ geom_tile(color = "white")+
+ scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+   midpoint = 0, limit = c(-1,1), space = "Lab", 
+   name="Pearson\nCorrelation") +
+  theme_minimal()+ 
+ theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+    size = 12, hjust = 1))+
+ coord_fixed()
+
+
+
+##correlation-plot of players' skill levels vs. their performance at the six positions[CAM, CB, CM, RB, RW, ST] + Overall performance
+
+cor_skillsVSpositions <- as.matrix(round(cor(fifa_players_attribures[,c(2:12, 18:35)], fifa_players_positions[,c(2,3,6,18,25,27,29)]), 2))
+
+#corrPlot
+corrplot(t(cor_skillsVSpositions), method = "pie")
+
+# 7 skills mostly correlated for player’s Overall performance table:
+Skills_corr_Overall <- as.table(cor_skillsVSpositions[, 7])
+Skills__corr_Overall <-Skills_corr_Overall[Skills_corr_Overall> 0.42]
+Skills__corr_Overall
+
+
+## Building a team by selecting six *different* players,one in each of the above positions in such a way that the players chosen are the best in their individual position.
+
+Players_6 <- c(fifa_players$Name[which(fifa_players$CAM == max(fifa_players$CAM))], fifa_players$Name[which(fifa_players$CB == max(fifa_players$CB))], fifa_players$Name[which(fifa_players$CM == max(fifa_players$CM))], fifa_players$Name[which(fifa_players$RB == max(fifa_players$RB))], fifa_players$Name[which(fifa_players$RW == max(fifa_players$RW))], fifa_players$Name[which(fifa_players$ST == max(fifa_players$ST))])
+
+Team_6 <- subset(fifa_players,select = c(2,12:22, 28:45,6))
+Team_6 <- Team_6 %>% filter(Name %in% unique(Players_6)) %>% arrange(Overall) %>% top_n(6)
+Team_6
+Average_Score <- mean(Team_6$Overall) ## Team Overall Average Score = 90
+Average_Score
+
+#Spider Chart
+Team <- gather(Team_6, key=Label, value=Score, -Name) %>% spread(key=Name , value=Score) 
+radarchart::chartJSRadar(Team,  axistype=3, seg=7, cglcol="grey", cglty=1, caxislabels=seq(0,20,6), cglwd=0.8, vlcex=0.8, title = "Team Abilities (of 6 best players)")
+
+
+
+##The different player's abilities changes with age, for players 35 years old or younger
+
+skills_by_age <- subset(fifa_players, select = c(3,12:22, 28:45))
+
+# divide the skill distribution to Above/Under Average 
+skill.by.age <- function(skills_by_age,i){
+  skill_age<- skills_by_age[,c(1,i)] %>% as.data.frame()
+  Name <- colnames(skill_age[2])
+  names(skill_age)[2] <- "skill"
+  skill_age <- skill_age %>%  group_by(Age) %>% summarise(MeanSkill = mean(skill))
+  skill_age$skill_scale <- round((skill_age$MeanSkill - mean(skill_age$MeanSkill))/sd(skill_age$MeanSkill), 2) # compute normalized skill
+  skill_age$skill_scale_type <- ifelse(skill_age$skill_scale  < 0, "below", "above")
+
+  g <- ggplot(skill_age, aes(x=reorder(Age,skill_scale), y=skill_scale, label=skill_scale)) + 
+    geom_bar(stat='identity', aes(fill=skill_scale_type), width=.5)  +
+    scale_fill_manual(name=Name, 
+                    labels = c("Above Average", "Below Average"), 
+                    values = c("above"="deeppink3", "below"="yellow")) + 
+    labs(subtitle="Normalized Skill by Age", 
+       title= Name)+ 
+    scale_y_continuous(name ='Normalized Skill') +
+    scale_x_discrete(name ='Age') +
+    coord_flip()
+  return(g)
+}
+
+# Plot for every skill
+for(i in 2:30){
+  print(skill.by.age(skills_by_age, i))
+}
+
+
+## Multiple regression model predicting player's Overall performance based on their skill level at the 29 different skills
+
+data <- subset(fifa_players,select = c(6,12:22, 28:45))
+model <- lm(Overall ~ .,data) # Multiple regression model: 29 skills are independant variables
+summary(model)#R^2:  0.7703: 77% of the variability in Ovaerall is explained by all the skills
+
+##error analysis - histogram and QQ-plot
+e <- resid(model)
+#histogram of residuals
+hist(e, breaks=30)
+
+# QQ Plot
+qqnorm(e)
+qqline(e)
+
+# Both histogram and QQ plot indicate normal distribution of residuals.
+
+# Standartized residuals vs. prediction
+r <- stdres(model)
+pred <- model$fitted.values
+plot(r, pred, xlab = "Standartized Residuals", ylab = "Prediction")
+
+least_Overall_performance_players <- fifa_players_info %>% dplyr::select(Name, Overall) %>% mutate(Pred.Overall = pred, Pred.Overall.Diff = pred - Overall) %>% arrange(desc(Pred.Overall.Diff))%>% head(10)
+least_Overall_performance_players
+
+table(least_Overall_performance_players[,1])
+
+```
+
+
+
